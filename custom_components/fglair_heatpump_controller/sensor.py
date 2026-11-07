@@ -1,0 +1,217 @@
+"""Diagnostic sensors for FGLair devices.
+
+The FGLair cloud returns every property of a device together with the time the device last
+reported it (``data_updated_at``). The climate entity only uses a few of them. This platform
+exposes, per device:
+
+* ``Last contact`` - newest ``data_updated_at`` of all properties, i.e. when the device last
+  reported anything to the cloud. If it stops advancing, the device has lost its cloud
+  connection even though the climate entity still shows the last known state.
+* ``Last change`` - when a property value last changed between two polls.
+* one diagnostic sensor per further property with a real value (not 65535). Only a few useful
+  ones are enabled by default, the others are created disabled and can be enabled in the UI.
+
+The data comes from the climate entity's regular poll (dispatcher signal), no extra API calls.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+import logging
+from typing import Any
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, RestoreSensor
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
+
+from .const import DOMAIN, SIGNAL_PROPERTIES
+
+_LOGGER: logging.Logger = logging.getLogger(__package__)
+
+_MAX_STATE = 255
+
+# Enabled by default; all other properties are created disabled.
+ENABLED = {"error_code", "op_status", "wifi_led_enable"}
+
+# Properties the climate entity already shows - no extra sensor for them.
+HANDLED = {
+    "operation_mode", "adjust_temperature", "display_temperature", "fan_speed",
+    "af_vertical_swing", "af_vertical_direction", "af_horizontal_swing",
+    "af_horizontal_direction", "economy_mode", "powerful_mode", "min_heat", "refresh",
+    "get_prop", "get_prop2",
+}
+
+NAMES = {
+    "error_code": "Error code",
+    "op_status": "Operation status",
+    "wifi_led_enable": "Wi-Fi LED",
+    "model_name": "Model",
+    "mcu_fw_version": "Controller firmware",
+    "oem_host_version": "Wi-Fi module firmware",
+    "device_name": "Device name",
+    "device_capabilities": "Device capabilities",
+    "af_vertical_num_dir": "Vertical airflow positions",
+    "af_horizontal_num_dir": "Horizontal airflow positions",
+    "outdoor_temperature": "Outdoor temperature raw",
+    "outdoor_low_noise": "Outdoor low noise",
+    "human_det": "Human detection",
+    "coil_dry_mode": "Coil dry mode",
+    "external_thermostat_off": "External thermostat off",
+    "heat_sterilizatio": "Heat sterilization",
+    "comm_version": "Communication version",
+    "ac_info1": "AC info 1",
+    "monitor1": "Monitor 1",
+    "monitor2": "Monitor 2",
+    "ota_status": "OTA status",
+}
+
+
+def is_placeholder(value: Any) -> bool:
+    """65535 (or a list of 65535/empty) means: not supported by this model."""
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return int(value) == 65535
+    parts = str(value).replace(":", ",").split(",")
+    return all(p.strip() in ("", "65535") for p in parts)
+
+
+def display_name(name: str) -> str:
+    """English display name of a property."""
+    return NAMES.get(name) or name.replace("_", " ").strip().capitalize()
+
+
+def _parse_time(text: Any) -> datetime | None:
+    if not text:
+        return None
+    return dt_util.parse_datetime(str(text))
+
+
+def device_info(dsn: str, device_name: str | None) -> DeviceInfo:
+    """Device shared by the climate entity and the diagnostic sensors."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, dsn)},
+        name=device_name or dsn,
+        manufacturer="Fujitsu General",
+    )
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the diagnostic sensors; entities are created when properties arrive."""
+    manager = _DiagnosticsManager(async_add_entities)
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_PROPERTIES, manager.async_update)
+    )
+    for dsn, (name, properties) in list(
+        hass.data.get(DOMAIN, {}).get("properties", {}).items()
+    ):
+        manager.async_update(dsn, name, properties)
+
+
+class _DiagnosticsManager:
+    """Creates and updates the sensors of all devices."""
+
+    def __init__(self, async_add_entities: AddEntitiesCallback) -> None:
+        self._add = async_add_entities
+        self._entities: dict[tuple[str, str], _BaseSensor] = {}
+        self._previous: dict[str, dict[str, Any]] = {}
+
+    @callback
+    def async_update(self, dsn: str, device_name: str | None, properties: Any) -> None:
+        if not isinstance(properties, list):
+            return
+        values: dict[str, Any] = {}
+        updated_at: dict[str, datetime] = {}
+        for item in properties:
+            prop = item.get("property") if isinstance(item, dict) else None
+            if not isinstance(prop, dict) or "name" not in prop:
+                continue
+            values[prop["name"]] = prop.get("value")
+            if (t := _parse_time(prop.get("data_updated_at"))) is not None:
+                updated_at[prop["name"]] = t
+
+        new: list[_BaseSensor] = []
+
+        def entity(key: str, factory) -> _BaseSensor:
+            if (dsn, key) not in self._entities:
+                self._entities[(dsn, key)] = factory()
+                new.append(self._entities[(dsn, key)])
+            return self._entities[(dsn, key)]
+
+        contact = entity("last_contact", lambda: _TimestampSensor(dsn, device_name, "last_contact", "Last contact"))
+        change = entity("last_change", lambda: _TimestampSensor(dsn, device_name, "last_change", "Last change"))
+        if updated_at:
+            contact.set_value(max(updated_at.values()))
+        previous = self._previous.get(dsn)
+        if previous is not None:
+            changed = [n for n, v in values.items() if previous.get(n) != v]
+            if changed:
+                times = [updated_at[n] for n in changed if n in updated_at]
+                change.set_value(max(times) if times else dt_util.utcnow())
+        self._previous[dsn] = values
+
+        for name, value in values.items():
+            if name in HANDLED or is_placeholder(value):
+                continue
+            sensor = entity(name, lambda n=name: _PropertySensor(dsn, device_name, n))
+            sensor.set_value(value)
+
+        if new:
+            self._add(new)
+        for sensor in self._entities.values():
+            if sensor.dsn == dsn and sensor.hass is not None and sensor not in new:
+                sensor.async_write_ha_state()
+
+
+class _BaseSensor(SensorEntity):
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, dsn: str, device_name: str | None, key: str, name: str) -> None:
+        self.dsn = dsn
+        self._attr_unique_id = f"{dsn}_{key}"
+        self._attr_name = name
+        self._attr_device_info = device_info(dsn, device_name)
+
+    def set_value(self, value: Any) -> None:
+        raise NotImplementedError
+
+
+class _TimestampSensor(_BaseSensor, RestoreSensor):
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def set_value(self, value: datetime) -> None:
+        self._attr_native_value = value
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self._attr_native_value is None and (last := await self.async_get_last_sensor_data()):
+            self._attr_native_value = last.native_value if isinstance(last.native_value, datetime) else _parse_time(last.native_value)
+
+
+class _PropertySensor(_BaseSensor):
+
+    def __init__(self, dsn: str, device_name: str | None, prop: str) -> None:
+        super().__init__(dsn, device_name, prop, display_name(prop))
+        self._attr_entity_registry_enabled_default = prop in ENABLED
+        if prop == "error_code":
+            self._attr_icon = "mdi:alert-circle-outline"
+
+    def set_value(self, value: Any) -> None:
+        text = value if isinstance(value, (int, float)) and not isinstance(value, bool) else str(value)
+        if isinstance(text, str) and len(text) > _MAX_STATE:
+            self._attr_extra_state_attributes = {"value": text}
+            text = text[: _MAX_STATE - 1] + "…"
+        self._attr_native_value = text

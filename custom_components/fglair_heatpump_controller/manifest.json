@@ -8,14 +8,14 @@
   ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/bigmoby/fglair_for_homeassistant/blob/main/README.md",
+  "documentation": "https://github.com/Schimmelreiter/fglair_for_homeassistant/blob/main/README.md",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/bigmoby/fglair_for_homeassistant/issues",
+  "issue_tracker": "https://github.com/Schimmelreiter/fglair_for_homeassistant/issues",
   "loggers": [
     "pyfujitsugeneral"
   ],
   "requirements": [
     "pyfujitsugeneral==2.0.36", "aiofiles>=25.1.0"
   ],
-  "version": "0.5.0.1"
+  "version": "0.5.0.2"
 }

@@ -7,6 +7,8 @@ from functools import partial
 import logging
 from typing import Any
 
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.components.climate import PLATFORM_SCHEMA, ClimateEntity
 from homeassistant.components.climate.const import (
     DOMAIN as CLIMATE_DOMAIN,
@@ -52,6 +54,7 @@ from pyfujitsugeneral.exceptions import FGLairGeneralException
 from pyfujitsugeneral.splitAC import SplitAC, get_prop_from_json
 
 from . import FglairDataUpdateCoordinator
+from .sensor import device_info as _device_info
 from .const import (
     CONF_TEMPERATURE_OFFSET,
     CONF_TOKENPATH,
@@ -59,6 +62,7 @@ from .const import (
     DEFAULT_TEMPERATURE_OFFSET,
     DEFAULT_TOKEN_PATH,
     DOMAIN,
+    SIGNAL_PROPERTIES,
     HORIZONTAL,
     MAX_TEMP,
     MIN_TEMP,
@@ -554,6 +558,15 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
             return
 
         self._name = self.name  # ensure name is current
+
+        # Diagnose-Sensoren (sensor.py) mit den Rohdaten der Cloud versorgen
+        self._hass.data.setdefault(DOMAIN, {}).setdefault("properties", {})[self._dsn] = (
+            self._name,
+            self._properties,
+        )
+        async_dispatcher_send(
+            self._hass, SIGNAL_PROPERTIES, self._dsn, self._name, self._properties
+        )
 
         _LOGGER.debug(
             "FujitsuClimate device [%s] detected supported presets: %s",
@@ -1087,6 +1100,15 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
         )
 
     # ===> old stuff
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Device shared with the diagnostic sensors."""
+        try:
+            name = self.name
+        except (KeyError, TypeError):
+            name = None
+        return _device_info(self._dsn, name)
 
     @property
     def unique_id(self) -> str:
