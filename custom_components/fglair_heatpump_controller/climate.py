@@ -11,7 +11,6 @@ from homeassistant.components.climate import PLATFORM_SCHEMA, ClimateEntity
 from homeassistant.components.climate.const import (
     DOMAIN as CLIMATE_DOMAIN,
     FAN_AUTO,
-    FAN_DIFFUSE,
     FAN_HIGH,
     FAN_LOW,
     FAN_MEDIUM,
@@ -117,17 +116,21 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     }
 )
 
+# Fujitsu "Quiet" (App: L - leise). HA kennt dafuer keinen Standardmodus; frueher wurde auf
+# "diffuse" ausgewichen, was inhaltlich falsch ist.
+FAN_QUIET = "quiet"
+
 DICT_FAN_MODE = {
     FAN_AUTO: "Auto",
     FAN_LOW: "Low",
     FAN_MEDIUM: "Medium",
     FAN_HIGH: "High",
-    FAN_DIFFUSE: "Quiet",
+    FAN_QUIET: "Quiet",
     "Auto": FAN_AUTO,
     "Low": FAN_LOW,
     "Medium": FAN_MEDIUM,
     "High": FAN_HIGH,
-    "Quiet": FAN_DIFFUSE,
+    "Quiet": FAN_QUIET,
 }
 
 FUJITSU_TO_HA_STATE = {
@@ -333,7 +336,7 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
             FAN_LOW,
             FAN_MEDIUM,
             FAN_HIGH,
-            FAN_DIFFUSE,
+            FAN_QUIET,
         ]
         self._hvac_modes: list[HVACMode] = SUPPORTED_MODES
 
@@ -590,7 +593,7 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
             FAN_LOW,
             FAN_MEDIUM,
             FAN_HIGH,
-            FAN_DIFFUSE,
+            FAN_QUIET,
         ]
         self._hvac_modes = SUPPORTED_MODES
         self._preset_modes = [PRESET_NONE, PRESET_ECO, PRESET_BOOST, PRESET_AWAY]
