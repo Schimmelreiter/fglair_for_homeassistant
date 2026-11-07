@@ -9,7 +9,7 @@ from homeassistant.const import Platform
 NAME = "FGLair Home Assistant Integration"
 DOMAIN = "fglair_heatpump_controller"
 DOMAIN_DATA = f"{DOMAIN}_data"
-VERSION = "0.5.0.2"
+VERSION = "0.5.0.3"
 
 ATTRIBUTION = "Data provided by http://jsonplaceholder.typicode.com/"
 ISSUE_URL = "https://github.com/Schimmelreiter/fglair_for_homeassistant/issues"
@@ -21,10 +21,13 @@ ICON = "mdi:format-quote-close"
 BINARY_SENSOR_DEVICE_CLASS = "connectivity"
 
 # Platforms
-PLATFORMS = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.BINARY_SENSOR]
 
 # Climate entity -> diagnostic sensors: (dsn, device name, raw property list)
 SIGNAL_PROPERTIES = f"{DOMAIN}_properties"
+
+# Ohne erfolgreichen Abruf bzw. ohne Meldung der Anlage so lange -> nicht verfuegbar
+STALE_AFTER = timedelta(minutes=10)
 
 # Configuration and options
 CONF_TOKENPATH = "tokenpath"

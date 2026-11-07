@@ -20,9 +20,14 @@ from datetime import datetime
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, RestoreSensor
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -113,10 +118,10 @@ async def async_setup_entry(
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_PROPERTIES, manager.async_update)
     )
-    for dsn, (name, properties) in list(
+    for dsn, (name, properties, extras) in list(
         hass.data.get(DOMAIN, {}).get("properties", {}).items()
     ):
-        manager.async_update(dsn, name, properties)
+        manager.async_update(dsn, name, properties, extras)
 
 
 class _DiagnosticsManager:
@@ -128,7 +133,13 @@ class _DiagnosticsManager:
         self._previous: dict[str, dict[str, Any]] = {}
 
     @callback
-    def async_update(self, dsn: str, device_name: str | None, properties: Any) -> None:
+    def async_update(
+        self,
+        dsn: str,
+        device_name: str | None,
+        properties: Any,
+        extras: dict[str, Any] | None = None,
+    ) -> None:
         if not isinstance(properties, list):
             return
         values: dict[str, Any] = {}
@@ -151,8 +162,17 @@ class _DiagnosticsManager:
 
         contact = entity("last_contact", lambda: _TimestampSensor(dsn, device_name, "last_contact", "Last contact"))
         change = entity("last_change", lambda: _TimestampSensor(dsn, device_name, "last_change", "Last change"))
+        poll = entity("last_poll", lambda: _TimestampSensor(dsn, device_name, "last_poll", "Last poll"))
+        extras = extras or {}
         if updated_at:
             contact.set_value(max(updated_at.values()))
+        if extras.get("last_poll") is not None:
+            poll.set_value(extras["last_poll"])
+        indoor = entity("indoor_temperature", lambda: _TemperatureSensor(dsn, device_name, "indoor_temperature", "Indoor temperature"))
+        indoor.set_value(extras.get("indoor"))
+        if extras.get("outdoor") is not None or (dsn, "outdoor_temperature_c") in self._entities:
+            outdoor = entity("outdoor_temperature_c", lambda: _TemperatureSensor(dsn, device_name, "outdoor_temperature_c", "Outdoor temperature"))
+            outdoor.set_value(extras.get("outdoor"))
         previous = self._previous.get(dsn)
         if previous is not None:
             changed = [n for n, v in values.items() if previous.get(n) != v]
@@ -199,6 +219,19 @@ class _TimestampSensor(_BaseSensor, RestoreSensor):
         await super().async_added_to_hass()
         if self._attr_native_value is None and (last := await self.async_get_last_sensor_data()):
             self._attr_native_value = last.native_value if isinstance(last.native_value, datetime) else _parse_time(last.native_value)
+
+
+class _TemperatureSensor(_BaseSensor):
+    """Innen-/Aussentemperatur als normaler Temperatursensor (keine Diagnose-Entitaet)."""
+
+    _attr_entity_category = None
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
+
+    def set_value(self, value: Any) -> None:
+        self._attr_native_value = value if isinstance(value, (int, float)) else None
 
 
 class _PropertySensor(_BaseSensor):

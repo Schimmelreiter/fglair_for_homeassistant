@@ -6,10 +6,16 @@
 >
 > Changes compared to the original:
 > * fan speed *Quiet* is exposed as `quiet` instead of `diffuse`
-> * each air conditioner gets a device in Home Assistant with diagnostic sensors:
->   `Last contact` (when the unit last reported to the FGLair cloud - shows when a unit has
->   silently lost its cloud connection), `Last change`, `Error code`, `Operation status`,
->   `Wi-Fi LED` and every further cloud property with a real value (most of them disabled by default)
+> * one shared login; if it fails at startup (the cloud often answers 401 for a while after a
+>   restart), the integration reports "not ready" and Home Assistant retries by itself
+> * availability reflects the unit, not the device list: a climate entity is unavailable when the
+>   last poll is older than 10 minutes or the unit has not reported to the cloud for more than
+>   10 minutes before that poll
+> * each air conditioner gets a device in Home Assistant with
+>   * `Indoor temperature` and `Outdoor temperature` as regular temperature sensors
+>   * `Connectivity` (unit reports to the cloud) and `Cloud connection` (Home Assistant can poll the cloud)
+>   * diagnostic sensors `Last poll`, `Last contact`, `Last change`, `Error code`, `Operation status`,
+>     `Wi-Fi LED` and every further cloud property with a real value (most of them disabled by default)
 >
 > **Installation via HACS:** add `https://github.com/Schimmelreiter/fglair_for_homeassistant`
 > as a custom repository (category *Integration*). Remove the original repository from HACS first;
