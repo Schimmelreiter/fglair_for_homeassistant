@@ -13,16 +13,16 @@
 
 This is a platform to support Fujitsu General Airconditioners under Climate component of Home Assistant.
 
-### See [README](https://github.com/bigmoby/fglair_for_homeassistant/blob/main/README.md) for usage instructions
+### See [README](https://github.com/Schimmelreiter/fglair_for_homeassistant/blob/main/README.md) for usage instructions
 
 ##
 
 ** "FGLair" is a trademark of FUJITSU GENERAL LIMITED.
 
-[releases-shield]: https://img.shields.io/github/release/bigmoby/fglair_for_homeassistant.svg
-[releases]: https://github.com/bigmoby/fglair_for_homeassistant/releases
+[releases-shield]: https://img.shields.io/github/release/Schimmelreiter/fglair_for_homeassistant.svg
+[releases]: https://github.com/Schimmelreiter/fglair_for_homeassistant/releases
 [project-stage-shield]: https://img.shields.io/badge/project%20stage-production%20ready-brightgreen.svg
-[license-shield]: https://img.shields.io/github/license/bigmoby/fglair_for_homeassistant
+[license-shield]: https://img.shields.io/github/license/Schimmelreiter/fglair_for_homeassistant
 [maintenance-shield]: https://img.shields.io/maintenance/yes/2024.svg
-[commits-shield]: https://img.shields.io/github/commit-activity/y/bigmoby/fglair_for_homeassistant.svg
-[commits]: https://img.shields.io/github/commits/bigmoby/fglair_for_homeassistant
+[commits-shield]: https://img.shields.io/github/commit-activity/y/Schimmelreiter/fglair_for_homeassistant.svg
+[commits]: https://img.shields.io/github/commits/Schimmelreiter/fglair_for_homeassistant

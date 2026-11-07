@@ -1,4 +1,19 @@
-# FGLair&trade; integration for homeassistant
+# FGLair&trade; integration for homeassistant (fork by Schimmelreiter)
+
+> **This is a fork** of [bigmoby/fglair_for_homeassistant](https://github.com/bigmoby/fglair_for_homeassistant).
+> All credit for the integration goes to bigmoby and the earlier authors (Mmodarre, xerxes87);
+> donations belong to the original author.
+>
+> Changes compared to the original:
+> * fan speed *Quiet* is exposed as `quiet` instead of `diffuse`
+> * each air conditioner gets a device in Home Assistant with diagnostic sensors:
+>   `Last contact` (when the unit last reported to the FGLair cloud - shows when a unit has
+>   silently lost its cloud connection), `Last change`, `Error code`, `Operation status`,
+>   `Wi-Fi LED` and every further cloud property with a real value (most of them disabled by default)
+>
+> **Installation via HACS:** add `https://github.com/Schimmelreiter/fglair_for_homeassistant`
+> as a custom repository (category *Integration*). Remove the original repository from HACS first;
+> both use the same domain `fglair_heatpump_controller`, so existing configuration and entities are kept.
 
 [![GitHub Release][releases-shield]][releases]
 ![Project Stage][project-stage-shield]
@@ -31,7 +46,7 @@ This is a platform to support Fujitsu General Airconditioners under Climate comp
 1. Add this repository to HACS:
 
 ```
-https://github.com/bigmoby/fglair_for_homeassistant
+https://github.com/Schimmelreiter/fglair_for_homeassistant
 ```
 
 2. Search for the `FGLair integration for homeassistant` integration and choose install.
@@ -169,10 +184,10 @@ The project uses:
 
 \*\* "FGLair" is a trademark of FUJITSU GENERAL LIMITED.
 
-[releases-shield]: https://img.shields.io/github/release/bigmoby/fglair_for_homeassistant.svg
-[releases]: https://github.com/bigmoby/fglair_for_homeassistant/releases
+[releases-shield]: https://img.shields.io/github/release/Schimmelreiter/fglair_for_homeassistant.svg
+[releases]: https://github.com/Schimmelreiter/fglair_for_homeassistant/releases
 [project-stage-shield]: https://img.shields.io/badge/project%20stage-production%20ready-brightgreen.svg
-[license-shield]: https://img.shields.io/github/license/bigmoby/fglair_for_homeassistant
+[license-shield]: https://img.shields.io/github/license/Schimmelreiter/fglair_for_homeassistant
 [maintenance-shield]: https://img.shields.io/maintenance/yes/2026.svg
-[commits-shield]: https://img.shields.io/github/commit-activity/y/bigmoby/fglair_for_homeassistant.svg
-[commits]: https://img.shields.io/github/commits/bigmoby/fglair_for_homeassistant
+[commits-shield]: https://img.shields.io/github/commit-activity/y/Schimmelreiter/fglair_for_homeassistant.svg
+[commits]: https://img.shields.io/github/commits/Schimmelreiter/fglair_for_homeassistant
