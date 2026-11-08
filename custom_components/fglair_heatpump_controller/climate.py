@@ -314,6 +314,8 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
     """Representation of a Fujitsu HVAC device."""
 
     _enable_turn_on_off_backwards_compatibility = False
+    # Uebersetzungen der Luefter-Modi (u. a. "quiet") und Symbole: translations/*.json, icons.json
+    _attr_translation_key = "fglair"
 
     def __init__(
         self,
@@ -602,11 +604,13 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
             await self._async_refresh_display_temperature_request(
                 self._fujitsu_device.get_refresh()["data_updated_at"]
             )
-        except (HomeAssistantError, KeyError) as ex:
+        except (HomeAssistantError, FGLairGeneralException, KeyError, TypeError, ValueError) as ex:
+            # Zeitueberschreitung oder Cloud-/Anmeldefehler: nur eine Zeile, kein Traceback -
+            # beim naechsten Abruf wird es erneut versucht.
             _LOGGER.warning(
-                "Failed to refresh display temperature for device %s: %s",
+                "Failed to request a refresh for device %s: %s",
                 self._name,
-                ex,
+                type(ex).__name__,
             )
 
         self._target_temperature = await self.async_target_temperature()

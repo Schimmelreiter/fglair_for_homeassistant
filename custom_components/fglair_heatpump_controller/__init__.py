@@ -4,6 +4,7 @@ with Home Assistant.
 
 import asyncio
 import logging
+import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME
@@ -12,6 +13,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pyfujitsugeneral.client import FGLairApiClient
+from pyfujitsugeneral.exceptions import FGLairGeneralException
 
 from .const import (
     CONF_TOKENPATH,
@@ -40,15 +42,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     session = async_get_clientsession(hass)
     client = FGLairApiClient(username, password, region, tokenpath, session)
+    _install_login_guard(client, str(username))
 
-    # Eine gemeinsame Anmeldung fuer Hintergrund-Abruf und Klima-Plattform. Scheitert sie (die
-    # FGLair-Cloud antwortet nach einem Neustart oft voruebergehend mit 401), meldet die
-    # Integration "noch nicht bereit" - Home Assistant versucht es dann selbst erneut, mit
-    # wachsendem Abstand, statt aufzugeben.
+    # Ein gemeinsamer Client fuer Hintergrund-Abruf und Klima-Plattform. Zuerst das gespeicherte
+    # Token (Datei tokenpath) benutzen - angemeldet wird nur, wenn es nicht mehr gilt. (0.5.0.3
+    # meldete sich bei jedem Versuch neu an; die FGLair-Cloud lehnt viele Anmeldungen kurz
+    # hintereinander mit 401 ab und blieb so nach einem Neustart minutenlang gesperrt.)
+    # Scheitert es, meldet die Integration "noch nicht bereit" - Home Assistant versucht es dann
+    # selbst erneut, mit wachsendem Abstand.
     try:
         async with asyncio.timeout(DEFAULT_TIMEOUT):
-            if not await client.async_authenticate():
-                raise ConfigEntryNotReady("FGLair: Anmeldung fehlgeschlagen")
             devices = await client.async_get_devices_dsn()
     except ConfigEntryNotReady:
         raise
@@ -64,6 +67,60 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+_LOGIN_REUSE = 60  # Sekunden: so lange gilt eine frische Anmeldung fuer alle Anfragen
+_LOGIN_BACKOFF_MIN = 120
+_LOGIN_BACKOFF_MAX = 1800
+
+
+# Zustand je Konto ueber Neuladen/Wiederholungen der Integration hinweg (sonst begaenne die
+# Wartezeit bei jedem "noch nicht bereit"-Versuch von vorn)
+_LOGIN_STATE: dict[str, dict] = {}
+
+
+def _install_login_guard(client: FGLairApiClient, account: str) -> None:
+    """Bremst Neuanmeldungen der Bibliothek.
+
+    pyfujitsugeneral meldet sich nach JEDEM Fehler einer Anfrage neu an (auch nach einer
+    Zeitueberschreitung), bei mehreren Anlagen gleichzeitig. Die FGLair-Cloud lehnt solche
+    Anmeldewellen mit 401 ab. Deshalb: immer nur eine Anmeldung zur Zeit; eine Anmeldung, die
+    weniger als eine Minute alt ist, wird mitbenutzt; nach einer gescheiterten Anmeldung wird
+    2 min, dann 4, 8 ... bis 30 min gar nicht angemeldet.
+    """
+    original = client.async_authenticate
+    state = _LOGIN_STATE.setdefault(
+        account, {"ok": 0.0, "fail": 0.0, "backoff": 0.0, "lock": asyncio.Lock()}
+    )
+    state["ok"] = 0.0  # neuer Client: dessen Token ist noch nicht geprueft
+    lock = state["lock"]
+
+    async def guarded() -> str:
+        async with lock:
+            now = time.monotonic()
+            token = getattr(client, "_ACCESS_TOKEN_STR", None)
+            if token and now - state["ok"] < _LOGIN_REUSE:
+                return str(token)
+            if now - state["fail"] < state["backoff"]:
+                raise FGLairGeneralException
+            try:
+                token = await original()
+            except FGLairGeneralException:
+                state["fail"] = time.monotonic()
+                state["backoff"] = min(
+                    _LOGIN_BACKOFF_MAX, max(_LOGIN_BACKOFF_MIN, state["backoff"] * 2)
+                )
+                _LOGGER.warning(
+                    "FGLair login failed - next login attempt in %d min",
+                    state["backoff"] // 60,
+                )
+                raise
+            if state["backoff"]:
+                _LOGGER.info("FGLair login successful again")
+            state["ok"], state["backoff"] = time.monotonic(), 0.0
+            return token
+
+    client.async_authenticate = guarded
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

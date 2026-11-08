@@ -88,6 +88,23 @@ def is_placeholder(value: Any) -> bool:
     return all(p.strip() in ("", "65535") for p in parts)
 
 
+# Properties with a translated name (translations/*.json, entity.sensor.<key>.name).
+# The cloud property "outdoor_temperature" is the raw value -> key "outdoor_temperature_raw".
+TRANSLATED = {
+    "error_code", "op_status", "wifi_led_enable", "model_name", "mcu_fw_version",
+    "oem_host_version", "device_name", "device_capabilities", "af_vertical_num_dir",
+    "af_horizontal_num_dir", "outdoor_low_noise", "human_det", "coil_dry_mode",
+    "external_thermostat_off", "heat_sterilizatio", "comm_version", "ac_info1", "monitor1",
+    "monitor2", "ota_status",
+}
+
+
+def translation_key(prop: str) -> str | None:
+    if prop == "outdoor_temperature":
+        return "outdoor_temperature_raw"
+    return prop if prop in TRANSLATED else None
+
+
 def display_name(name: str) -> str:
     """English display name of a property."""
     return NAMES.get(name) or name.replace("_", " ").strip().capitalize()
@@ -160,18 +177,18 @@ class _DiagnosticsManager:
                 new.append(self._entities[(dsn, key)])
             return self._entities[(dsn, key)]
 
-        contact = entity("last_contact", lambda: _TimestampSensor(dsn, device_name, "last_contact", "Last contact"))
-        change = entity("last_change", lambda: _TimestampSensor(dsn, device_name, "last_change", "Last change"))
-        poll = entity("last_poll", lambda: _TimestampSensor(dsn, device_name, "last_poll", "Last poll"))
+        contact = entity("last_contact", lambda: _TimestampSensor(dsn, device_name, "last_contact", "Last contact", "last_contact"))
+        change = entity("last_change", lambda: _TimestampSensor(dsn, device_name, "last_change", "Last change", "last_change"))
+        poll = entity("last_poll", lambda: _TimestampSensor(dsn, device_name, "last_poll", "Last poll", "last_poll"))
         extras = extras or {}
         if updated_at:
             contact.set_value(max(updated_at.values()))
         if extras.get("last_poll") is not None:
             poll.set_value(extras["last_poll"])
-        indoor = entity("indoor_temperature", lambda: _TemperatureSensor(dsn, device_name, "indoor_temperature", "Indoor temperature"))
+        indoor = entity("indoor_temperature", lambda: _TemperatureSensor(dsn, device_name, "indoor_temperature", "Indoor temperature", "indoor_temperature"))
         indoor.set_value(extras.get("indoor"))
         if extras.get("outdoor") is not None or (dsn, "outdoor_temperature_c") in self._entities:
-            outdoor = entity("outdoor_temperature_c", lambda: _TemperatureSensor(dsn, device_name, "outdoor_temperature_c", "Outdoor temperature"))
+            outdoor = entity("outdoor_temperature_c", lambda: _TemperatureSensor(dsn, device_name, "outdoor_temperature_c", "Outdoor temperature", "outdoor_temperature"))
             outdoor.set_value(extras.get("outdoor"))
         previous = self._previous.get(dsn)
         if previous is not None:
@@ -190,7 +207,8 @@ class _DiagnosticsManager:
         if new:
             self._add(new)
         for sensor in self._entities.values():
-            if sensor.dsn == dsn and sensor.hass is not None and sensor not in new:
+            # nur Entitaeten, die in HA aktiv sind (nicht deaktiviert/entfernt)
+            if sensor.dsn == dsn and sensor.active and sensor not in new:
                 sensor.async_write_ha_state()
 
 
@@ -199,11 +217,27 @@ class _BaseSensor(SensorEntity):
     _attr_should_poll = False
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, dsn: str, device_name: str | None, key: str, name: str) -> None:
+    def __init__(
+        self, dsn: str, device_name: str | None, key: str, name: str, tkey: str | None = None
+    ) -> None:
         self.dsn = dsn
+        self.active = False
         self._attr_unique_id = f"{dsn}_{key}"
-        self._attr_name = name
+        if tkey:
+            # Name kommt aus den Uebersetzungen (translations/*.json)
+            self._attr_translation_key = tkey
+        else:
+            self._attr_name = name
         self._attr_device_info = device_info(dsn, device_name)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.active = True
+
+    async def async_will_remove_from_hass(self) -> None:
+        # z. B. in der Oberflaeche deaktiviert: danach keine Werte mehr schreiben
+        self.active = False
+        await super().async_will_remove_from_hass()
 
     def set_value(self, value: Any) -> None:
         raise NotImplementedError
@@ -237,7 +271,7 @@ class _TemperatureSensor(_BaseSensor):
 class _PropertySensor(_BaseSensor):
 
     def __init__(self, dsn: str, device_name: str | None, prop: str) -> None:
-        super().__init__(dsn, device_name, prop, display_name(prop))
+        super().__init__(dsn, device_name, prop, display_name(prop), translation_key(prop))
         self._attr_entity_registry_enabled_default = prop in ENABLED
         if prop == "error_code":
             self._attr_icon = "mdi:alert-circle-outline"

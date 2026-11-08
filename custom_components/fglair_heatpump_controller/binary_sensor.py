@@ -70,7 +70,7 @@ class _Base(BinarySensorEntity):
 
 
 class _CloudConnection(_Base):
-    _attr_name = "Cloud connection"
+    _attr_translation_key = "cloud_connection"
     _attr_icon = "mdi:cloud-check-outline"
 
     def __init__(self, hass: HomeAssistant, dsn: str, device_name: str | None) -> None:
@@ -82,7 +82,8 @@ class _CloudConnection(_Base):
 
 
 class _DeviceConnectivity(_Base):
-    _attr_name = None  # Name der Geraeteklasse, von Home Assistant uebersetzt
+    # kein _attr_name: Home Assistant nimmt den uebersetzten Namen der Geraeteklasse
+    # (_attr_name = None hiess "Entitaet ist das Geraet" und zeigte den Geraetenamen)
 
     def __init__(self, hass: HomeAssistant, dsn: str, device_name: str | None) -> None:
         super().__init__(hass, dsn, device_name, "connectivity")

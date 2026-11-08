@@ -6,8 +6,14 @@
 >
 > Changes compared to the original:
 > * fan speed *Quiet* is exposed as `quiet` instead of `diffuse`
-> * one shared login; if it fails at startup (the cloud often answers 401 for a while after a
->   restart), the integration reports "not ready" and Home Assistant retries by itself
+> * one shared login that reuses the stored access token; a new login only when it is no longer
+>   valid. Logins are throttled: only one at a time, a fresh login is shared, and after a failed
+>   login (the cloud answers 401 when it gets many logins in a row) the next attempt waits 2 min,
+>   then 4, 8 ... up to 30 min. If the cloud is not reachable at startup, the integration reports
+>   "not ready" and Home Assistant retries by itself
+> * a failing refresh request (timeout, cloud error) is logged as one warning instead of a traceback
+> * translations (English, German, Dutch, Spanish, French) for all entity names and for the fan
+>   modes of the climate entity (e.g. *quiet* = "Leise"), with an icon for *quiet*
 > * availability reflects the unit, not the device list: a climate entity is unavailable when the
 >   last poll is older than 10 minutes or the unit has not reported to the cloud for more than
 >   10 minutes before that poll
