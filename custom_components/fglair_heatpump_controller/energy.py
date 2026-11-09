@@ -68,7 +68,7 @@ def _kind(state: State | None) -> str | None:
 
 
 def _unit(state: State | None) -> str:
-    """Unit of measurement of a state ("" if unknown)."""
+    """Return the unit of measurement of a state ("" if unknown)."""
     if state is None:
         return ""
     return _unit(state)
