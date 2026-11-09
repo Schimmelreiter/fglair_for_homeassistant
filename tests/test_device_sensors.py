@@ -1,7 +1,8 @@
 """Diagnostic, temperature and connectivity sensors of the FGLair devices."""
 
-from collections.abc import Iterator
-from datetime import datetime, timedelta
+from collections.abc import Iterable, Iterator
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from functools import partial
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,7 +19,9 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_component import async_update_entity
+from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -161,6 +164,20 @@ def _state(hass: HomeAssistant, platform: str, key: str) -> str | None:
     return state.state if state else None
 
 
+def _float_state(hass: HomeAssistant, platform: str, key: str) -> float:
+    """Numeric state of an entity of the device."""
+    state = _state(hass, platform, key)
+    assert state is not None, key
+    return float(state)
+
+
+def _entry(reg: er.EntityRegistry, entity_id: str) -> er.RegistryEntry:
+    """Registry entry of an entity that has to exist."""
+    entry = reg.async_get(entity_id)
+    assert entry is not None, entity_id
+    return entry
+
+
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_sensors_end_to_end(
     hass: HomeAssistant,
@@ -177,20 +194,20 @@ async def test_sensors_end_to_end(
 
     reg = er.async_get(hass)
     climate_id = _eid(hass, "climate", "climate")
-    device = reg.async_get(climate_id).device_id
+    device = _entry(reg, climate_id).device_id
     assert device is not None
     # all entities belong to the same device
     for key in ("last_contact", "indoor_temperature", "error_code"):
-        assert reg.async_get(_eid(hass, "sensor", key)).device_id == device
+        assert _entry(reg, _eid(hass, "sensor", key)).device_id == device
 
     assert _state(hass, "sensor", "last_contact") == first.isoformat()
     assert _state(hass, "sensor", "last_poll") is not None
     assert _state(hass, "sensor", "last_change") == STATE_UNKNOWN
-    assert float(_state(hass, "sensor", "indoor_temperature")) == 12.0
-    assert float(_state(hass, "sensor", "outdoor_temperature_c")) == 15.5
+    assert _float_state(hass, "sensor", "indoor_temperature") == 12.0
+    assert _float_state(hass, "sensor", "outdoor_temperature_c") == 15.5
     assert _state(hass, "sensor", "error_code") == "0"
     # further properties are created disabled; placeholders and handled ones not at all
-    assert reg.async_get(_eid(hass, "sensor", "model_name")).disabled_by is not None
+    assert _entry(reg, _eid(hass, "sensor", "model_name")).disabled_by is not None
     assert reg.async_get_entity_id("sensor", DOMAIN, f"{DSN}_monitor1") is None
     assert reg.async_get_entity_id("sensor", DOMAIN, f"{DSN}_fan_speed") is None
 
@@ -198,7 +215,9 @@ async def test_sensors_end_to_end(
     for key in ("connectivity", "cloud_connection"):
         await async_update_entity(hass, _eid(hass, "binary_sensor", key))
         assert _state(hass, "binary_sensor", key) == STATE_ON
-    assert hass.states.get(climate_id).state != "unavailable"
+    climate_state = hass.states.get(climate_id)
+    assert climate_state is not None
+    assert climate_state.state != "unavailable"
 
     # second poll: a value changed -> "Last change", sensors written again
     freezer.tick(timedelta(minutes=2))
@@ -306,15 +325,33 @@ def test_outdoor_degree() -> None:
 # ---------------------------------------------------------------- manager
 
 
-def _manager() -> tuple[_DiagnosticsManager, list]:
+def _manager() -> tuple[_DiagnosticsManager, list[Entity]]:
     """Diagnostics manager collecting the created entities."""
-    added: list = []
-    return _DiagnosticsManager(added.extend), added
+    added: list[Entity] = []
+
+    def add_entities(
+        new_entities: Iterable[Entity], update_before_add: bool = False
+    ) -> None:
+        added.extend(new_entities)
+
+    return _DiagnosticsManager(add_entities), added
 
 
-def _by_key(entities: list) -> dict[str, _BaseSensor]:
+def _by_key(entities: list[Entity]) -> dict[str, _BaseSensor]:
     """Return the created entities by unique id suffix."""
-    return {e.unique_id.removeprefix(f"{DSN}_"): e for e in entities}
+    sensors: dict[str, _BaseSensor] = {}
+    for entity in entities:
+        assert isinstance(entity, _BaseSensor)
+        assert entity.unique_id is not None
+        sensors[entity.unique_id.removeprefix(f"{DSN}_")] = entity
+    return sensors
+
+
+def _native(
+    sensor: _BaseSensor,
+) -> StateType | date | datetime | Decimal:
+    """Read the current value anew (it changes with every update)."""
+    return sensor.native_value
 
 
 def test_manager_ignores_invalid_data() -> None:
@@ -342,16 +379,18 @@ def test_manager_last_change_and_outdoor() -> None:
     item = {"property": {"name": "op_status", "value": 1}}
     mgr.async_update(DSN, "Living Room", [item], {"outdoor": 10.5})
     sensors = _by_key(added)
-    assert sensors["outdoor_temperature_c"].native_value == 10.5
-    assert sensors["last_change"].native_value is None
+    assert _native(sensors["outdoor_temperature_c"]) == 10.5
+    assert _native(sensors["last_change"]) is None
 
     # value changed, no data_updated_at: time of the poll
     before = dt_util.utcnow()
     item = {"property": {"name": "op_status", "value": 2}}
     mgr.async_update(DSN, "Living Room", [item], {"outdoor": None})
-    assert sensors["last_change"].native_value >= before
-    assert sensors["outdoor_temperature_c"].native_value is None
-    assert sensors["op_status"].native_value == 2
+    last_change = _native(sensors["last_change"])
+    assert isinstance(last_change, datetime)
+    assert last_change >= before
+    assert _native(sensors["outdoor_temperature_c"]) is None
+    assert _native(sensors["op_status"]) == 2
     assert len(added) == len(sensors)
 
 
@@ -386,8 +425,10 @@ def test_property_sensor_values() -> None:
     assert other.name == "Custom thing"
     assert other.entity_registry_enabled_default is False
     other.set_value(LONG)
-    assert len(other.native_value) == _MAX_STATE
-    assert other.native_value.endswith("…")
+    shortened = other.native_value
+    assert isinstance(shortened, str)
+    assert len(shortened) == _MAX_STATE
+    assert shortened.endswith("…")
     assert other.extra_state_attributes == {"value": LONG}
 
 

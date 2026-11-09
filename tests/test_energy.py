@@ -1,15 +1,17 @@
 """Upstream meter: energy per operating mode and hvac_action from the measured power."""
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from functools import partial
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.climate.const import HVACAction, HVACMode
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.entity import Entity
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -41,6 +43,30 @@ from custom_components.fglair_heatpump_controller.sensor import (
 
 E = "sensor.plug_energy"
 P = "sensor.plug_power"
+
+
+def _action(entity: FujitsuClimate) -> HVACAction | None:
+    """Read hvac_action anew (it changes with the measured power)."""
+    return entity.hvac_action
+
+
+def _last_energy(meter: UpstreamMeter) -> float | None:
+    """Read the starting point anew (it changes with new readings)."""
+    return meter.last_energy
+
+
+def _get(hass: HomeAssistant, entity_id: str | None) -> State:
+    """State of an entity that has to exist."""
+    assert entity_id is not None
+    state = hass.states.get(entity_id)
+    assert state is not None, entity_id
+    return state
+
+
+def _uid(entity: Entity) -> str:
+    """Return the unique id of an entity that has one."""
+    assert entity.unique_id is not None
+    return entity.unique_id
 
 
 def _plug(hass: HomeAssistant) -> None:
@@ -77,12 +103,12 @@ async def test_energy_split_by_mode(hass: HomeAssistant) -> None:
     """Energy steps are assigned to the counter of the current operating mode."""
     _plug(hass)
     meter = UpstreamMeter(hass, "dsn1", E, 150)
-    mode = {"m": HVACMode.HEAT, "t": 22.0, "c": 19.0}
+    mode: dict[str, Any] = {"m": HVACMode.HEAT, "t": 22.0, "c": 19.0}
     meter.mode_provider = lambda: (mode["m"], mode["t"], mode["c"])
     meter.async_start()
     assert meter.energy_id == E and meter.power_id == P
     meter.restore_last_energy(None)  # starting point = current reading
-    got: list = []
+    got: list[tuple[str, float]] = []
     meter.add_energy_listener(lambda b, k: got.append((b, round(k, 4))))
 
     hass.states.async_set(E, "100.5", {"unit_of_measurement": "kWh"})
@@ -123,14 +149,16 @@ async def test_restore_counts_downtime(hass: HomeAssistant) -> None:
     meter.mode_provider = lambda: (HVACMode.HEAT, 22.0, 20.0)
     meter.async_start()
     meter.restore_last_energy(99.0)  # reading stored before the restart
-    got: list = []
+    got: list[tuple[str, float]] = []
     meter.add_energy_listener(lambda b, k: got.append((b, round(k, 4))))
     hass.states.async_set(E, "100.2", {"unit_of_measurement": "kWh"})
     await hass.async_block_till_done()
     assert got == [("heat", 1.2)]
 
 
-async def test_power_only_integrates(hass: HomeAssistant, freezer) -> None:
+async def test_power_only_integrates(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
     """Without an energy counter the power is integrated over time."""
     hass.states.async_set(
         P, "1000", {"unit_of_measurement": "W", "device_class": "power"}
@@ -139,7 +167,7 @@ async def test_power_only_integrates(hass: HomeAssistant, freezer) -> None:
     meter.mode_provider = lambda: (HVACMode.HEAT, 22.0, 20.0)
     meter.async_start()
     assert meter.energy_id is None and meter.power_id == P and meter.running() is True
-    got: list = []
+    got: list[tuple[str, float]] = []
     meter.add_energy_listener(lambda b, k: got.append((b, round(k, 4))))
     freezer.tick(1800)
     hass.states.async_set(P, "10", {"unit_of_measurement": "W"})
@@ -177,9 +205,9 @@ async def test_hvac_action_from_power(hass: HomeAssistant) -> None:
     meter.mode_provider = lambda: (heat.hvac_mode, 22.0, 20.0)
     assert heat.hvac_mode == HVACMode.HEAT
     meter.power = 5
-    assert heat.hvac_action == HVACAction.IDLE
+    assert _action(heat) == HVACAction.IDLE
     meter.power = 900
-    assert heat.hvac_action == HVACAction.HEATING
+    assert _action(heat) == HVACAction.HEATING
     assert _climate(hass, 1, "heat", op="Defrost").hvac_action == HVACAction.PREHEATING
     cool = _climate(hass, 1, "cool")
     assert cool.hvac_action == HVACAction.COOLING
@@ -189,13 +217,13 @@ async def test_hvac_action_from_power(hass: HomeAssistant) -> None:
     auto = _climate(hass, 1, "auto")
     meter.mode_provider = lambda: (HVACMode.AUTO, 22.0, 25.0)
     meter.power = 400
-    assert auto.hvac_action == HVACAction.COOLING
+    assert _action(auto) == HVACAction.COOLING
     meter.mode_provider = lambda: (HVACMode.AUTO, 22.0, 19.0)
-    assert auto.hvac_action == HVACAction.HEATING
+    assert _action(auto) == HVACAction.HEATING
     # without meter: as before (mode only)
     hass.data[DOMAIN]["meters"] = {}
     meter.power = 5
-    assert heat.hvac_action == HVACAction.HEATING
+    assert _action(heat) == HVACAction.HEATING
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -215,7 +243,9 @@ async def test_options_flow(hass: HomeAssistant) -> None:
     }
     r = await hass.config_entries.options.async_init(entry.entry_id)
     assert r["type"] == "form"
-    keys = [str(k) for k in r["data_schema"].schema]
+    schema = r["data_schema"]
+    assert schema is not None
+    keys = [str(k) for k in schema.schema]
     assert keys == ["Schlafzimmer", "Wohnzimmer", CONF_ACTION_THRESHOLD]
     r = await hass.config_entries.options.async_configure(
         r["flow_id"], {"Schlafzimmer": E, CONF_ACTION_THRESHOLD: 200}
@@ -232,12 +262,20 @@ async def test_energy_sensors(hass: HomeAssistant) -> None:
     meter.mode_provider = lambda: (HVACMode.COOL, 22.0, 25.0)
     meter.async_start()
     hass.data.setdefault(DOMAIN, {})["meters"] = {"dsn1": meter}
-    added: list = []
-    mgr = _EnergyManager(hass, added.extend)
+    added: list[_EnergySensor] = []
+
+    def add_entities(
+        new_entities: Iterable[Entity], update_before_add: bool = False
+    ) -> None:
+        for entity in new_entities:
+            assert isinstance(entity, _EnergySensor)
+            added.append(entity)
+
+    mgr = _EnergyManager(hass, add_entities)
     mgr.async_update("dsn1", "Schlafzimmer", [], {})
     mgr.async_update("dsn1", "Schlafzimmer", [], {})  # only once
     mgr.async_update("dsn9", "ohne Zaehler", [], {})
-    assert sorted(e.unique_id for e in added) == sorted(
+    assert sorted(_uid(e) for e in added) == sorted(
         f"dsn1_energy_{b}" for b in ("heat", "cool", "dry", "fan", "standby", "total")
     )
     for e in added:
@@ -245,7 +283,7 @@ async def test_energy_sensors(hass: HomeAssistant) -> None:
     meter.restore_last_energy(None)
     hass.states.async_set(E, "100.4", {"unit_of_measurement": "kWh"})
     await hass.async_block_till_done()
-    werte = {e.unique_id.split("_energy_")[1]: e.native_value for e in added}
+    werte = {_uid(e).split("_energy_")[1]: e.native_value for e in added}
     assert werte == {
         "heat": 0.0,
         "cool": 0.4,
@@ -254,9 +292,11 @@ async def test_energy_sensors(hass: HomeAssistant) -> None:
         "standby": 0.0,
         "total": 0.4,
     }
-    total = next(e for e in added if e.unique_id.endswith("total"))
+    total = next(e for e in added if _uid(e).endswith("total"))
     total._update_attrs()
-    assert total.extra_state_attributes["source_reading"] == 100.4
+    attributes = total.extra_state_attributes
+    assert attributes is not None
+    assert attributes["source_reading"] == 100.4
 
 
 def test_helpers() -> None:
@@ -330,7 +370,7 @@ async def test_meter_defaults(hass: HomeAssistant) -> None:
     # meter entity unknown yet: treated as energy counter
     meter.async_start()
     assert meter.energy_id == E and meter.power_id is None
-    got: list = []
+    got: list[tuple[str, float]] = []
     meter.add_energy_listener(lambda b, k: got.append((b, round(k, 4))))
     # first reading without a restored one: only the starting point
     hass.states.async_set(E, "10", {"unit_of_measurement": "Wh"})
@@ -360,10 +400,10 @@ async def test_restore_without_reading(hass: HomeAssistant) -> None:
     meter = UpstreamMeter(hass, "dsn1", E, 150)
     meter.async_start()
     meter.restore_last_energy(None)
-    assert meter.last_energy is None
+    assert _last_energy(meter) is None
     hass.states.async_set(E, "2", {"unit_of_measurement": "MWh"})
     await hass.async_block_till_done()
-    assert meter.last_energy == 2000
+    assert _last_energy(meter) == 2000
     meter.async_stop()
 
 
@@ -372,7 +412,7 @@ async def test_power_listeners(hass: HomeAssistant) -> None:
     _plug(hass)
     meter = UpstreamMeter(hass, "dsn1", E, 150)
     meter.async_start()
-    calls: list = []
+    calls: list[float | None] = []
     remove = meter.add_power_listener(lambda: calls.append(meter.power))
     hass.states.async_set(P, "900", {"unit_of_measurement": "W"})
     await hass.async_block_till_done()
@@ -394,9 +434,9 @@ async def test_hvac_action_drying(hass: HomeAssistant) -> None:
     hass.data.setdefault(DOMAIN, {})["meters"] = {"dsn1": meter}
     dry = _climate(hass, 1, "dry")
     meter.power = 400
-    assert dry.hvac_action == HVACAction.DRYING
+    assert _action(dry) == HVACAction.DRYING
     meter.power = 5
-    assert dry.hvac_action == HVACAction.IDLE
+    assert _action(dry) == HVACAction.IDLE
 
 
 def test_energy_sensor_ignores_property_poll(hass: HomeAssistant) -> None:
@@ -525,19 +565,19 @@ async def test_meter_end_to_end(hass: HomeAssistant) -> None:
     meter = meters[DSN]
     assert meter.energy_id == E and meter.power_id == P
     # restored values; the stored counter reading is the starting point
-    assert float(hass.states.get(heat).state) == 1.5
-    assert float(hass.states.get(cool).state) == 0.0
-    assert float(hass.states.get(dry).state) == 0.0
-    assert float(hass.states.get(total).state) == 3.0
+    assert float(_get(hass, heat).state) == 1.5
+    assert float(_get(hass, cool).state) == 0.0
+    assert float(_get(hass, dry).state) == 0.0
+    assert float(_get(hass, total).state) == 3.0
     assert meter.last_energy == 99.0
-    assert hass.states.get(total).attributes["source"] == E
+    assert _get(hass, total).attributes["source"] == E
 
     # energy since the stored reading counts as heating (mode from the climate entity)
     hass.states.async_set(E, "100.5", {"unit_of_measurement": "kWh"})
     await hass.async_block_till_done()
-    assert float(hass.states.get(heat).state) == 3.0
-    assert float(hass.states.get(total).state) == 4.5
-    assert hass.states.get(total).attributes["source_reading"] == 100.5
+    assert float(_get(hass, heat).state) == 3.0
+    assert float(_get(hass, total).state) == 4.5
+    assert _get(hass, total).attributes["source_reading"] == 100.5
 
     # every new power value updates hvac_action of the climate entity
     climate_id = er.async_get(hass).async_get_entity_id(
@@ -545,10 +585,10 @@ async def test_meter_end_to_end(hass: HomeAssistant) -> None:
     )
     hass.states.async_set(P, "900", {"unit_of_measurement": "W"})
     await hass.async_block_till_done()
-    assert hass.states.get(climate_id).attributes["hvac_action"] == "heating"
+    assert _get(hass, climate_id).attributes["hvac_action"] == "heating"
     hass.states.async_set(P, "5", {"unit_of_measurement": "W"})
     await hass.async_block_till_done()
-    assert hass.states.get(climate_id).attributes["hvac_action"] == "idle"
+    assert _get(hass, climate_id).attributes["hvac_action"] == "idle"
 
     # options changed: the integration is reloaded without the meter
     hass.config_entries.async_update_entry(entry, options={CONF_METERS: {}})
@@ -557,4 +597,4 @@ async def test_meter_end_to_end(hass: HomeAssistant) -> None:
     assert meter._unsub is None
     assert entry.state is ConfigEntryState.LOADED
     # hvac_action no longer derived from the (low) measured power
-    assert hass.states.get(climate_id).attributes.get("hvac_action") != "idle"
+    assert _get(hass, climate_id).attributes.get("hvac_action") != "idle"
