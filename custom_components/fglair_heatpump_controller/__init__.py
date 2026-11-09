@@ -3,6 +3,7 @@ with Home Assistant.
 """
 
 import asyncio
+from functools import partial
 import logging
 import time
 
@@ -81,11 +82,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             meter.async_start()
             meters[dsn] = meter
             entry.async_on_unload(meter.async_stop)
-            entry.async_on_unload(lambda d=dsn: meters.pop(d, None))
+            entry.async_on_unload(partial(_forget_meter, meters, dsn))
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def _forget_meter(meters: dict[str, UpstreamMeter], dsn: str) -> None:
+    """Zaehler eines Geraets beim Entladen vergessen (muss None liefern: HA plant einen
+    Rueckgabewert sonst als Task ein und das Entladen scheitert)."""
+    meters.pop(dsn, None)
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
