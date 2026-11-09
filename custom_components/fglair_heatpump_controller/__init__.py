@@ -3,6 +3,7 @@ with Home Assistant.
 """
 
 import asyncio
+from functools import partial
 import logging
 import time
 
@@ -77,11 +78,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             meter.async_start()
             meters[dsn] = meter
             entry.async_on_unload(meter.async_stop)
-            entry.async_on_unload(lambda d=dsn: meters.pop(d, None))
+            entry.async_on_unload(partial(_forget_meter, meters, dsn))
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def _forget_meter(meters: dict[str, UpstreamMeter], dsn: str) -> None:
+    """Remove the meter of a device on unload.
+
+    Must return None: Home Assistant schedules a returned value as a task.
+    """
+    meters.pop(dsn, None)
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
