@@ -9,7 +9,7 @@ from homeassistant.const import Platform
 NAME = "FGLair Home Assistant Integration"
 DOMAIN = "fglair_heatpump_controller"
 DOMAIN_DATA = f"{DOMAIN}_data"
-VERSION = "0.5.0.4"
+VERSION = "0.5.0.5"
 
 ATTRIBUTION = "Data provided by http://jsonplaceholder.typicode.com/"
 ISSUE_URL = "https://github.com/Schimmelreiter/fglair_for_homeassistant/issues"
@@ -34,6 +34,12 @@ CONF_TOKENPATH = "tokenpath"
 CONF_TEMPERATURE_OFFSET = "temperature_offset"
 
 DEFAULT_TEMPERATURE_OFFSET: float = 0.0
+
+# Options: upstream meter per device (dsn -> entity_id) and power threshold for "compressor
+# running" (W)
+CONF_METERS = "meters"
+CONF_ACTION_THRESHOLD = "action_threshold"
+DEFAULT_ACTION_THRESHOLD: float = 150.0
 DEFAULT_TOKEN_PATH = "token.txt"
 
 MIN_TEMP = 16

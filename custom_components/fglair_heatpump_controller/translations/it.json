@@ -21,5 +21,41 @@
     "abort": {
       "already_configured": "L'integrazione FGLair è già configurata con queste credenziali di accesso. Access token has been refreshed."
     }
+  },
+  "entity": {
+    "sensor": {
+      "energy_heat": {
+        "name": "Energia riscaldamento"
+      },
+      "energy_cool": {
+        "name": "Energia raffreddamento"
+      },
+      "energy_dry": {
+        "name": "Energia deumidificazione"
+      },
+      "energy_fan": {
+        "name": "Energia ventilazione"
+      },
+      "energy_standby": {
+        "name": "Energia standby"
+      },
+      "energy_total": {
+        "name": "Energia totale"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Contatori a monte",
+        "description": "Facoltativo per ogni unità un contatore di energia (kWh) o sensore di potenza (W) a monte, ad es. una presa smart. Fornisce contatori di energia per modalità e l'unità indica se riscalda/raffredda o è inattiva.",
+        "data": {
+          "action_threshold": "Soglia compressore in funzione"
+        },
+        "data_description": {
+          "action_threshold": "Sopra questa potenza il compressore funziona (riscaldare/raffreddare), sotto l'unità è inattiva."
+        }
+      }
+    }
   }
 }

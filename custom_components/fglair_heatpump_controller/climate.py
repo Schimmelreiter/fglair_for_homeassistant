@@ -53,6 +53,7 @@ from pyfujitsugeneral.exceptions import FGLairGeneralException
 from pyfujitsugeneral.splitAC import SplitAC, get_prop_from_json
 
 from . import FglairDataUpdateCoordinator
+from .energy import UpstreamMeter
 from .sensor import device_info as _device_info
 from .const import (
     CONF_TEMPERATURE_OFFSET,
@@ -389,7 +390,27 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""
         await super().async_added_to_hass()
+        # Vorgeschalteter Zaehler (Optionen): Betriebsart fuer die Energie-Aufteilung liefern,
+        # bei jeder neuen Leistung hvac_action neu schreiben
+        if (meter := self._meter) is not None:
+            meter.mode_provider = lambda: (
+                self.hvac_mode if self._properties is not None else None,
+                self._target_temperature,
+                self._current_temperature,
+            )
+            self.async_on_remove(meter.add_power_listener(self._async_power_changed))
         self._handle_coordinator_update()
+
+    @property
+    def _meter(self) -> UpstreamMeter | None:
+        data = getattr(self._hass, "data", None)
+        meter = data.get(DOMAIN, {}).get("meters", {}).get(self._dsn) if isinstance(data, dict) else None
+        return meter if isinstance(meter, UpstreamMeter) else None
+
+    @callback
+    def _async_power_changed(self) -> None:
+        if self.hass is not None and self._properties is not None:
+            self.async_write_ha_state()
 
     @property
     def name(self) -> str:
@@ -529,6 +550,22 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
         # HVACAction.IDLE is not (yet) managed by underlying pyfujitsugeneral library
         if not self.is_on:
             return HVACAction.OFF
+
+        # Mit vorgeschaltetem Zaehler: Verdichter laeuft (Leistung ueber der Schwelle) oder nicht
+        meter = self._meter
+        running = meter.running() if meter is not None else None
+        if running is not None and self._fujitsu_device.get_op_status_desc() != "Defrost":
+            mode = self.hvac_mode
+            if mode == HVACMode.FAN_ONLY:
+                return HVACAction.FAN
+            if not running:
+                return HVACAction.IDLE
+            if mode == HVACMode.DRY:
+                return HVACAction.DRYING
+            bucket = meter.bucket() if meter is not None else None
+            if mode == HVACMode.COOL or (mode == HVACMode.AUTO and bucket == "cool"):
+                return HVACAction.COOLING
+            return HVACAction.HEATING
 
         op_status_desc = self._fujitsu_device.get_op_status_desc()
 

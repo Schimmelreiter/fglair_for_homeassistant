@@ -22,6 +22,17 @@
 >   * `Connectivity` (unit reports to the cloud) and `Cloud connection` (Home Assistant can poll the cloud)
 >   * diagnostic sensors `Last poll`, `Last contact`, `Last change`, `Error code`, `Operation status`,
 >     `Wi-Fi LED` and every further cloud property with a real value (most of them disabled by default)
+> * optional **upstream meter** per unit (integration options): an energy meter (kWh/Wh) or power
+>   sensor (W) in front of the unit, e.g. a smart plug. The unit then gets energy counters per
+>   operating mode (`Energy heating`, `Energy cooling`, `Energy drying`, `Energy fan`,
+>   `Energy standby`, `Energy total`; kWh, *total increasing*, kept over restarts, counter resets
+>   and implausible jumps are not counted). A power sensor on the same device as the energy meter is
+>   found automatically. With the measured power the climate entity reports its real `hvac_action`:
+>   above the threshold (default 150 W) the compressor is running (heating/cooling/drying; in auto
+>   mode heating or cooling from target vs. room temperature), below it the unit is *idle*.
+>   The units report mode changes to the cloud with a delay of about 45 s, so energy around a mode
+>   change may count for the previous mode for that time. In the energy dashboard, enter the plug as
+>   the upstream device of the counters to avoid double counting.
 >
 > **Installation via HACS:** add `https://github.com/Schimmelreiter/fglair_for_homeassistant`
 > as a custom repository (category *Integration*). Remove the original repository from HACS first;
