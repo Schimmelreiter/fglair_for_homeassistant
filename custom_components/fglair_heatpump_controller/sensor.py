@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.sensor import (
     RestoreSensor,
@@ -313,7 +313,7 @@ class _DiagnosticsManager:
 class _BaseSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_category: EntityCategory | None = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -401,7 +401,7 @@ class _EnergySensor(_BaseSensor, RestoreSensor):
         restored_reading = None
         if (last := await self.async_get_last_sensor_data()) is not None:
             try:
-                self._attr_native_value = float(last.native_value or 0)
+                self._attr_native_value = float(str(last.native_value or 0))
             except TypeError, ValueError:
                 self._attr_native_value = 0.0
         if self._bucket == "total":
@@ -426,7 +426,9 @@ class _EnergySensor(_BaseSensor, RestoreSensor):
     def _async_add(self, bucket: str, kwh: float) -> None:
         if self._bucket not in ("total", bucket):
             return
-        self._attr_native_value = round(float(self._attr_native_value or 0) + kwh, 4)
+        self._attr_native_value = round(
+            float(cast(float, self._attr_native_value or 0)) + kwh, 4
+        )
         self._update_attrs()
         if self.active:
             self.async_write_ha_state()

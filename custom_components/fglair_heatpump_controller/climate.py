@@ -560,9 +560,9 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
 
         # With an upstream meter: compressor running (power above the threshold) or not
         meter = self._meter
-        running = meter.running() if meter is not None else None
         if (
-            running is not None
+            meter is not None
+            and (running := meter.running()) is not None
             and self._fujitsu_device.get_op_status_desc() != "Defrost"
         ):
             mode = self.hvac_mode

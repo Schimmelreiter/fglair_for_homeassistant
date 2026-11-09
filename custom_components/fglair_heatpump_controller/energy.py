@@ -67,6 +67,13 @@ def _kind(state: State | None) -> str | None:
     return None
 
 
+def _unit(state: State | None) -> str:
+    """Unit of measurement of a state ("" if unknown)."""
+    if state is None:
+        return ""
+    return _unit(state)
+
+
 def _to_kwh(value: float, unit: str) -> float:
     return value / 1000 if unit == "Wh" else value * 1000 if unit == "MWh" else value
 
@@ -142,9 +149,7 @@ class UpstreamMeter:
         if self.power_id:
             st = self.hass.states.get(self.power_id)
             if (v := _number(st)) is not None:
-                self.power = _to_w(
-                    v, str(st.attributes.get("unit_of_measurement") or "")
-                )
+                self.power = _to_w(v, _unit(st))
                 self._last_power_time = dt_util.utcnow()
 
     @callback
@@ -178,7 +183,7 @@ class UpstreamMeter:
         if value is None:
             st = self.hass.states.get(self.energy_id)
             if (v := _number(st)) is not None:
-                value = _to_kwh(v, str(st.attributes.get("unit_of_measurement") or ""))
+                value = _to_kwh(v, _unit(st))
         self._last_energy = value
 
     @property
@@ -230,11 +235,7 @@ class UpstreamMeter:
 
     def _power_changed(self, new: State | None, old: State | None) -> None:
         now = dt_util.utcnow()
-        unit = (
-            str((new or old).attributes.get("unit_of_measurement") or "")
-            if (new or old)
-            else ""
-        )
+        unit = _unit(new or old)
         value = _number(new)
         if (
             self.energy_id is None
@@ -255,7 +256,7 @@ class UpstreamMeter:
         value = _number(new)
         if value is None:
             return  # keep the last reading; the next valid one continues from there
-        kwh = _to_kwh(value, str(new.attributes.get("unit_of_measurement") or ""))
+        kwh = _to_kwh(value, _unit(new))
         last, self._last_energy = self._last_energy, kwh
         if last is None:
             return
