@@ -685,7 +685,7 @@ class FujitsuClimate(CoordinatorEntity[FglairDataUpdateCoordinator], ClimateEnti
         self._preset_modes = [PRESET_NONE, PRESET_ECO, PRESET_BOOST, PRESET_AWAY]
         self._on = self.is_on
 
-        # Diagnose-Sensoren (sensor.py, binary_sensor.py) versorgen
+        # Feed the diagnostic sensors (sensor.py, binary_sensor.py)
         extras = {
             "last_poll": self._last_poll,
             "last_contact": self._last_contact,
