@@ -6,6 +6,7 @@ import asyncio
 from functools import partial
 import logging
 import time
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME
@@ -105,7 +106,7 @@ _LOGIN_BACKOFF_MAX = 1800
 
 # State per account across reloads/retries of the integration (otherwise the waiting
 # time would start over with every "not ready" retry)
-_LOGIN_STATE: dict[str, dict] = {}
+_LOGIN_STATE: dict[str, dict[str, Any]] = {}
 
 
 def _install_login_guard(client: FGLairApiClient, account: str) -> None:
@@ -168,6 +169,7 @@ class FglairDataUpdateCoordinator(DataUpdateCoordinator[None]):
     ) -> None:
         """Initialize."""
         self.client = client
+        self.devices: list[str] = []
 
         super().__init__(
             hass,

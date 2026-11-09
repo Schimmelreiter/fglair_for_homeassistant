@@ -20,7 +20,7 @@ from datetime import datetime
 import logging
 from typing import Any
 
-from homeassistant.components.climate import HVACMode
+from homeassistant.components.climate.const import HVACMode
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import (
     Event,
